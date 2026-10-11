@@ -6,6 +6,9 @@ import com.example.userservice.dto.UserResponse;
 import com.example.userservice.entity.UserEntity;
 import com.example.userservice.exception.UserAlreadyExistsException;
 import com.example.userservice.exception.UserNotFoundException;
+import com.example.userservice.kafka.UserEvent;
+import com.example.userservice.kafka.UserEventProducer;
+import com.example.userservice.kafka.UserOperation;
 import com.example.userservice.mapper.UserMapper;
 import com.example.userservice.repository.UserRepository;
 import org.slf4j.Logger;
@@ -20,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static com.example.userservice.mapper.UserMapper.toEntity;
 import static com.example.userservice.mapper.UserMapper.toResponse;
@@ -30,10 +34,14 @@ import static com.example.userservice.mapper.UserMapper.toResponse;
 @Service
 public class UserService {
     private final UserRepository repository;
+    private final UserEventProducer producer;
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
+    private  final NotificationClient client;
 
-    public UserService(UserRepository repository) {
+    public UserService(UserRepository repository, UserEventProducer producer, NotificationClient client) {
         this.repository = repository;
+        this.producer = producer;
+        this.client = client;
     }
 
     @Transactional
@@ -48,6 +56,18 @@ public class UserService {
             UserEntity entity = toEntity(request);
             UserEntity saved = repository.save(entity);
             log.info("Пользователь успешно сохранён: {}.", saved);
+            UserEvent event = new UserEvent(
+                    UUID.randomUUID(),
+                    UserOperation.CREATE,
+                    saved.getEmail());
+            try {
+                producer.send(event);
+                log.info("Событие отправлено в кафка: {}, {}", event.operation(), event.email());
+            } catch (Exception e) {
+                log.error("Кафка недоступна: {}", e.getMessage());
+                client.sendNotification(event);
+            }
+
             return toResponse(saved);
         } catch (DataIntegrityViolationException e) {
             throw new UserAlreadyExistsException("Пользователь с таким mail " + request.email() + " уже существует");
@@ -97,12 +117,20 @@ public class UserService {
     @Transactional
     public void delete(Integer id) {
         log.info("Удаление пользователя по id={}.", id);
-        if (!repository.existsById(id)) {
-            log.warn("Пользователь с id={} не найден.", id);
-            throw new UserNotFoundException("Пользователь с id=" + id + " не найден");
-        }
+        UserEntity user = repository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Пользователь с id={} не найден.", id);
+                    return new UserNotFoundException(
+                            "Пользователь с id=" + id + " не найден"
+                    );
+                });
+        String email = user.getEmail();
+        repository.delete(user);
         log.info("Пользователь с id={} удален. ", id);
-        repository.deleteById(id);
+        producer.send(new UserEvent(
+                UUID.randomUUID(),
+                UserOperation.DELETE,
+                email));
     }
 
     @Transactional(readOnly = true)

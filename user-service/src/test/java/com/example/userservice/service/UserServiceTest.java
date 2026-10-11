@@ -6,6 +6,9 @@ import com.example.userservice.dto.UserResponse;
 import com.example.userservice.entity.UserEntity;
 import com.example.userservice.exception.UserAlreadyExistsException;
 import com.example.userservice.exception.UserNotFoundException;
+import com.example.userservice.kafka.UserEvent;
+import com.example.userservice.kafka.UserEventProducer;
+import com.example.userservice.kafka.UserOperation;
 import com.example.userservice.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,10 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.*;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,25 +29,47 @@ class UserServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private UserEventProducer userEventProducer;
+
     @InjectMocks
     private UserService userService;
 
     @Test
     void createUser_successfully() {
-        UserRequest userRequest = new UserRequest("Dave", "dave@example.com", 40);
-        UserEntity savedUser = new UserEntity("Dave", "dave@example.com", 40);
+        UserRequest userRequest =
+                new UserRequest("Dave", "dave@example.com", 40);
+
+        UserEntity savedUser =
+                new UserEntity("Dave", "dave@example.com", 40);
         savedUser.setId(1);
 
-        when(userRepository.existsByEmail(userRequest.email())).thenReturn(false);
-        when(userRepository.save(any(UserEntity.class))).thenReturn(savedUser);
+        when(userRepository.existsByEmail(userRequest.email()))
+                .thenReturn(false);
 
-        UserResponse userResponse = userService.createUser(userRequest);
+        when(userRepository.save(any(UserEntity.class)))
+                .thenReturn(savedUser);
+
+        UserResponse userResponse =
+                userService.createUser(userRequest);
+
         assertNotNull(userResponse);
         assertEquals(userRequest.name(), userResponse.name());
         assertEquals(userRequest.email(), userResponse.email());
         assertEquals(userRequest.age(), userResponse.age());
-        verify(userRepository).existsByEmail(userRequest.email());
-        verify(userRepository).save(any(UserEntity.class));
+
+        verify(userRepository)
+                .existsByEmail(userRequest.email());
+
+        verify(userRepository)
+                .save(any(UserEntity.class));
+
+        verify(userEventProducer)
+                .send(new UserEvent(
+                        UUID.randomUUID(),
+                        UserOperation.CREATE,
+                        userRequest.email()
+                ));
     }
 
     @Test
@@ -177,28 +199,48 @@ class UserServiceTest {
     }
 
     @Test
-    void deleteUser_ifUsersExists() {
+    void deleteUser_ifUserExists() {
         Integer id = 1;
+        UserEntity user = new UserEntity("Dave", "dave@example.com", 40);
+        user.setId(id);
 
-        when(userRepository.existsById(id)).thenReturn(true);
+        when(userRepository.findById(id))
+                .thenReturn(Optional.of(user));
 
         userService.delete(id);
-        verify(userRepository).existsById(id);
-        verify(userRepository).deleteById(id);
+
+        verify(userRepository).findById(id);
+        verify(userRepository).delete(user);
+
+        verify(userEventProducer).send(
+                new UserEvent(
+                        UUID.randomUUID(),
+                        UserOperation.DELETE,
+                        "dave@example.com"
+                )
+        );
     }
 
     @Test
     void deleteUser_ifUserNotFoundTest() {
         Integer id = 99;
 
-        when(userRepository.existsById(id)).thenReturn(false);
+        when(userRepository.findById(id))
+                .thenReturn(Optional.empty());
 
         UserNotFoundException exception = assertThrows(
-                UserNotFoundException.class, () -> userService.delete(id)
+                UserNotFoundException.class,
+                () -> userService.delete(id)
         );
-        assertEquals("Пользователь с id=99 не найден", exception.getMessage());
-        verify(userRepository).existsById(id);
-        verify(userRepository, never()).deleteById(id);
+
+        assertEquals(
+                "Пользователь с id=99 не найден",
+                exception.getMessage()
+        );
+
+        verify(userRepository).findById(id);
+        verify(userRepository, never()).delete(any(UserEntity.class));
+        verify(userEventProducer, never()).send(any(UserEvent.class));
     }
 
     @Test
