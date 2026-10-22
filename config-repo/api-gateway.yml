@@ -1,0 +1,63 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: user-service-route
+          uri: lb://user-service
+          predicates:
+            - Path=/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userServiceCircuitBreaker
+
+        - id: notification-service-route
+          uri: lb://notification-service
+          predicates:
+            - Path=/notification/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: notificationServiceCircuitBreaker
+
+        # 1. Специальный маршрут для Swagger-документации user-service (БЕЗ CB)
+        - id: user-service-swagger-route
+          uri: lb://user-service
+          predicates:
+            - Path=/users/v3/api-docs
+
+        # 2. Специальный маршрут для Swagger-документации notification-service (БЕЗ CB)
+        - id: notification-service-swagger-route
+          uri: lb://notification-service
+          predicates:
+            - Path=/notification/v3/api-docs
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: user-service
+        url: /users/v3/api-docs
+      - name: notification-service
+        url: /notification/v3/api-docs
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      userServiceCircuitBreaker:
+        minimumNumberOfCalls: 5
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true
+
+      notificationServiceCircuitBreaker:
+        minimumNumberOfCalls: 5
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true

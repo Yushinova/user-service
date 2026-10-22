@@ -1,0 +1,61 @@
+server:
+  port: 8082
+
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/postgres # <-- ИМЯ КОНТЕЙНЕРА postgres
+    username: postgres
+    password: 12345678
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    default-schema: notification_service
+    schemas: notification_service
+    enabled: true
+    baseline-on-migrate: true
+    ignore-migration-patterns: "*:missing"
+    out-of-order: true
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  mail:
+    host: smtp.yandex.ru
+    port: 465
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+
+  kafka:
+    bootstrap-servers: kafka:9092 # <-- ИМЯ КОНТЕЙНЕРА kafka
+    consumer:
+      group-id: notification-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.example.notificationservice.kafka.UserEvent
+
+# Блок Eureka вынесен из spring на корневой уровень!
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/ # <-- ИМЯ КОНТЕЙНЕРА eureka-server
+  instance:
+    prefer-ip-address: true
+
+springdoc:
+  api-docs:
+    path: /notification/v3/api-docs
+  server:
+    url: http://localhost:8080 # <-- Оставляем localhost (браузер стучится с вашего ПК)
